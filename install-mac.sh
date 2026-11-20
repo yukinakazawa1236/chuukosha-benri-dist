@@ -162,6 +162,19 @@ command -v codesign >/dev/null 2>&1 && codesign --force --deep -s - "$APP_BUNDLE
 xattr -dr com.apple.quarantine "$APP_BUNDLE" "$APP_DIR" 2>/dev/null || true
 echo "起動用のアプリを作りました（方式：${APP_KIND}）"
 
+# デスクトップにも、アイコンを置く（テスト用の保存先を指定したときは、置かない）
+DESKTOP_APP="${HOME}/Desktop/ESCO Drive.app"
+if [ -z "${ESCO_TEST:-}" ] && [ -z "${ESCO_HOME:-}" ] && [ -d "${HOME}/Desktop" ]; then
+  rm -rf "${DESKTOP_APP}"
+  if cp -R "${APP_BUNDLE}" "${DESKTOP_APP}" 2>"${WORK}/desk.err"; then
+    xattr -dr com.apple.quarantine "${DESKTOP_APP}" 2>/dev/null || true
+    echo "デスクトップにも、「ESCO Drive」のアイコンを置きました。"
+  else
+    printf '（デスクトップへの配置は、できませんでした：%s）\n' "$(head -c 200 "${WORK}/desk.err")" >&2
+    echo "（Macの設定で、ターミナルに「デスクトップフォルダ」へのアクセスを許可すると、置けます。起動は、ホームの Applications からでもできます）"
+  fi
+fi
+
 say "5/5 起動を確認しています"
 if [ -n "${ESCO_NO_OPEN:-}" ] || [ -n "${ESCO_TEST:-}" ]; then
   echo "（起動の確認は、省きます）"
@@ -187,7 +200,7 @@ else
 fi
 
 printf '\n完了しました（バージョン %s）。\n' "$VERSION"
-printf '次回から、「%s」を、ダブルクリック（または、Spotlight で「ESCO Drive」）で、開けます。\n' "$APP_BUNDLE"
+printf '次回から、デスクトップの「ESCO Drive」を、ダブルクリック（または、Spotlight で「ESCO Drive」）で、開けます。\n本体の場所：%s\n' "$APP_BUNDLE"
 if [ -n "$SHARED_DIR" ]; then
   printf 'このMacは、見る専用です。共有フォルダ（%s）の最新データが、自動で取り込まれます。\n' "$SHARED_DIR"
 else
