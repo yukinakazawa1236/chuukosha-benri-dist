@@ -142,6 +142,7 @@ EOS
   <key>CFBundleExecutable</key><string>ESCODrive</string>
   <key>CFBundleIconFile</key><string>icon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSHighResolutionCapable</key><true/>
@@ -160,9 +161,34 @@ else
   APP_KIND="script"
   make_script_bundle
 fi
+# アプリの情報（Info.plist）を、通常のMacアプリと同じにそろえる。
+#   osacompile で作ると、アプリの識別名（CFBundleIdentifier）が入らないことがあり、
+#   その場合、検索では出ても、「アプリ」の一覧（全アプリ・カテゴリ別）に出ないことがある。
+PLIST="${APP_BUNDLE}/Contents/Info.plist"
+plist_put() { # キー 型 値：あれば書き換え、なければ追加
+  /usr/libexec/PlistBuddy -c "Set :${1} \"${3}\"" "${PLIST}" >/dev/null 2>&1     || /usr/libexec/PlistBuddy -c "Add :${1} ${2} \"${3}\"" "${PLIST}" >/dev/null 2>&1 || true
+}
+if [ -f "${PLIST}" ] && [ -x /usr/libexec/PlistBuddy ]; then
+  plist_put CFBundleIdentifier string jp.esco.drive
+  plist_put CFBundleName string "ESCO Drive"
+  plist_put CFBundleDisplayName string "ESCO Drive"
+  plist_put CFBundleShortVersionString string "${VERSION:-1.0}"
+  plist_put CFBundleVersion string "${VERSION:-1.0}"
+  plist_put LSApplicationCategoryType string public.app-category.productivity
+  # アイコン：Contents/Resources/applet.icns を使う。CFBundleIconName が残っていると、Mac標準の絵が優先されて、独自のアイコンが出ないため、消す
+  [ ! -f "${APP_BUNDLE}/Contents/Resources/applet.icns" ] || plist_put CFBundleIconFile string applet
+  /usr/libexec/PlistBuddy -c "Delete :CFBundleIconName" "${PLIST}" >/dev/null 2>&1 || true
+  echo "アプリの識別名：$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${PLIST}" 2>/dev/null || echo なし)"
+fi
 # 簡易の署名（Macが、アプリを正しく扱えるように）と、「隔離」の印の除去
 command -v codesign >/dev/null 2>&1 && codesign --force --deep -s - "$APP_BUNDLE" >/dev/null 2>&1 || true
 xattr -dr com.apple.quarantine "$APP_BUNDLE" "$APP_DIR" 2>/dev/null || true
+# Macに、アプリの場所を登録し直す（検索や「アプリ」の一覧に、反映されやすくする。データは消さない）
+touch "${APP_BUNDLE}" 2>/dev/null || true
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+[ -x "${LSREGISTER}" ] && "${LSREGISTER}" -f "${APP_BUNDLE}" >/dev/null 2>&1 || true
+# 検索の索引にも、新しい情報で登録し直す（索引の初期化はしない。このアプリだけ）
+command -v mdimport >/dev/null 2>&1 && mdimport "${APP_BUNDLE}" >/dev/null 2>&1 || true
 echo "起動用のアプリを作りました（方式：${APP_KIND}）"
 
 # 前の版が置いた、別の場所のアプリ（ホームの Applications・デスクトップ）は、二重にならないように片づける
