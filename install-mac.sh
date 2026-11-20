@@ -45,7 +45,7 @@ if [ -z "$SHARED_DIR" ]; then
     if [ -n "$SELF_DIR" ] && [ -f "$SELF_DIR/ESCO_Drive_shared.json" ]; then SHARED_DIR="$SELF_DIR"; fi
   fi
 fi
-[ -z "$SHARED_DIR" ] || echo "共有フォルダ：$SHARED_DIR（インストール後、自動で設定します）"
+[ -z "$SHARED_DIR" ] || echo "共有フォルダ：${SHARED_DIR}（インストール後、自動で設定します）"
 
 mkdir -p "$HOME_DIR" "$APP_DIR"
 
@@ -59,7 +59,7 @@ diagnose() {
 }
 
 # 書き込めるかを、先に確かめる（書けないのに、途中まで進めない）
-if ! ( : > "$APP_DIR/.write_test" ) 2>/dev/null; then diagnose; fail "インストール先（$APP_DIR）に、書き込めません。"; fi
+if ! ( : > "$APP_DIR/.write_test" ) 2>/dev/null; then diagnose; fail "インストール先（${APP_DIR}）に、書き込めません。"; fi
 rm -f "$APP_DIR/.write_test"
 
 # zipの展開：Mac標準の ditto（Windowsで作ったzipも、日本語の名前も扱える）→ unzip → tar の順に試す
@@ -90,8 +90,10 @@ echo "バージョン $VERSION"
 say "2/5 本体をダウンロードして、展開しています"
 curl -fL --progress-bar "$BASE/app.zip?t=$(date +%s)" -o "$WORK/app.zip" || { diagnose; fail "本体をダウンロードできません。"; }
 [ "$(sha256 "$WORK/app.zip")" = "$WANT_SHA" ] || fail "ダウンロードしたファイルが壊れています（確認の値が一致しません）。もう一度実行してください。"
-if ! extract_zip "$WORK/app.zip" "$APP_DIR"; then diagnose; fail "本体を展開できませんでした。"; fi
-[ -f "$APP_DIR/server.mjs" ] || { diagnose; fail "本体を展開できませんでした（server.mjs が見つかりません）。"; }
+if ! extract_zip "$WORK/app.zip" "$APP_DIR"; then diagnose; fail "本体を展開できませんでした（ditto・unzip・tar のすべてで失敗）。表示された理由は、容量不足とは限りません（書き込みの許可なども、確認してください）。"; fi
+for needed in server.mjs lib/launcher.mjs lib/shared.mjs public/index.html node_modules/xlsx/package.json; do
+  [ -f "${APP_DIR}/${needed}" ] || { diagnose; fail "本体の展開が、不完全です（${needed} が見つかりません）。展開の途中で止まった可能性があります。もう一度実行してください。"; }
+done
 
 say "3/5 Node.js（実行に必要な部品）を入れています"
 if [ ! -x "$APP_DIR/runtime/node" ]; then
@@ -158,7 +160,7 @@ fi
 # 簡易の署名（Macが、アプリを正しく扱えるように）と、「隔離」の印の除去
 command -v codesign >/dev/null 2>&1 && codesign --force --deep -s - "$APP_BUNDLE" >/dev/null 2>&1 || true
 xattr -dr com.apple.quarantine "$APP_BUNDLE" "$APP_DIR" 2>/dev/null || true
-echo "起動用のアプリを作りました（方式：$APP_KIND）"
+echo "起動用のアプリを作りました（方式：${APP_KIND}）"
 
 say "5/5 起動を確認しています"
 if [ -n "${ESCO_NO_OPEN:-}" ] || [ -n "${ESCO_TEST:-}" ]; then
