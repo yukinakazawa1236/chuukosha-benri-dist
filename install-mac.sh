@@ -30,6 +30,37 @@ esac
 
 mkdir -p "$HOME_DIR" "$APP_DIR"
 
+# 失敗したときの手がかり（空き容量・書き込み権限）
+diagnose() {
+  printf '\n--- 手がかり ---\n' >&2
+  printf '使用者: %s\n' "$(whoami)" >&2
+  df -h "$HOME_DIR" 2>&1 | tail -2 >&2 || true
+  ls -ld "$HOME_DIR" "$APP_DIR" 2>&1 >&2 || true
+  printf 'ヒント：エージェント（Codexなど）から実行している場合は、「書き込みの許可（サンドボックスの外での実行）」を求めて、もう一度実行してください。\n' >&2
+}
+
+# 書き込めるかを、先に確かめる（書けないのに、途中まで進めない）
+if ! ( : > "$APP_DIR/.write_test" ) 2>/dev/null; then diagnose; fail "インストール先（$APP_DIR）に、書き込めません。"; fi
+rm -f "$APP_DIR/.write_test"
+
+# zipの展開：Mac標準の ditto（Windowsで作ったzipも、日本語の名前も扱える）→ unzip → tar の順に試す
+extract_zip() {
+  local zip="$1" dest="$2"
+  if command -v ditto >/dev/null 2>&1; then
+    if ditto -x -k "$zip" "$dest" 2>"$WORK/extract.err"; then return 0; fi
+    printf '（ditto での展開に失敗：%s）\n' "$(head -c 300 "$WORK/extract.err")" >&2
+    rm -rf "$dest"; mkdir -p "$dest"
+  fi
+  if command -v unzip >/dev/null 2>&1; then
+    if unzip -q -o "$zip" -d "$dest" 2>"$WORK/extract.err"; then return 0; fi
+    printf '（unzip での展開に失敗：%s）\n' "$(head -c 300 "$WORK/extract.err")" >&2
+    rm -rf "$dest"; mkdir -p "$dest"
+  fi
+  if tar -xf "$zip" -C "$dest" 2>"$WORK/extract.err"; then return 0; fi
+  printf '（tar での展開に失敗：%s）\n' "$(head -c 300 "$WORK/extract.err")" >&2
+  return 1
+}
+
 say "1/4 最新版を確認しています"
 curl -fsSL "$BASE/latest.json?t=$(date +%s)" -o "$WORK/latest.json" || fail "最新版の情報を取得できません。ネットにつながっているか確認してください。"
 VERSION="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$WORK/latest.json" | head -1)"
@@ -40,8 +71,8 @@ echo "バージョン $VERSION"
 say "2/4 本体をダウンロードしています"
 curl -fL --progress-bar "$BASE/app.zip?t=$(date +%s)" -o "$WORK/app.zip" || fail "本体をダウンロードできません。"
 [ "$(sha256 "$WORK/app.zip")" = "$WANT_SHA" ] || fail "ダウンロードしたファイルが壊れています（確認の値が一致しません）。もう一度実行してください。"
-if command -v unzip >/dev/null 2>&1; then unzip -q -o "$WORK/app.zip" -d "$APP_DIR"; else tar -xf "$WORK/app.zip" -C "$APP_DIR"; fi
-[ -f "$APP_DIR/server.mjs" ] || fail "本体を展開できませんでした。"
+if ! extract_zip "$WORK/app.zip" "$APP_DIR"; then diagnose; fail "本体を展開できませんでした。"; fi
+[ -f "$APP_DIR/server.mjs" ] || { diagnose; fail "本体を展開できませんでした（server.mjs が見つかりません）。"; }
 
 say "3/4 Node.js（実行に必要な部品）を入れています"
 if [ ! -x "$APP_DIR/runtime/node" ]; then
