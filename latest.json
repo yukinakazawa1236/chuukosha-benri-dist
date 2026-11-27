@@ -1,5 +1,6 @@
 {
-  "version": "1.0.22",
+  "version": "1.0.23",
   "zip": "app.zip",
-  "sha256": "1e297aff22ffb1622f1dd0dde894d702380856664545da3540aa229df5946273"
+  "sha256": "66ebf4523f199969c5ad7b91986ec844ccba3525c693d07eb061e8c13d984ab8",
+  "macAppSha256": "920eef2849cdc57012c6fc3179d94eea385d6ef986caac36437856fceb284568"
 }

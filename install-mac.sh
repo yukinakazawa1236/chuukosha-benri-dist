@@ -87,6 +87,7 @@ say "1/5 最新版を確認しています"
 curl -fsSL "$BASE/latest.json?t=$(date +%s)" -o "$WORK/latest.json" || { diagnose; fail "最新版の情報を取得できません。ネットにつながっているか（エージェントの場合は、ネットワークの許可があるか）確認してください。"; }
 VERSION="$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$WORK/latest.json" | head -1)"
 WANT_SHA="$(sed -n 's/.*"sha256": *"\([0-9a-f]*\)".*/\1/p' "$WORK/latest.json" | head -1)"
+MACAPP_SHA="$(sed -n 's/.*"macAppSha256": *"\([0-9a-f]*\)".*/\1/p' "$WORK/latest.json" | head -1)"
 [ -n "$VERSION" ] && [ -n "$WANT_SHA" ] || fail "最新版の情報が、正しくありません。"
 echo "バージョン $VERSION"
 
@@ -120,7 +121,7 @@ if [ -n "$SHARED_DIR" ]; then
   echo "共有フォルダを、設定しました：$SHARED_DIR"
 fi
 
-say "4/5 起動用のアプリ（ESCO Drive.app）を作っています"
+say "4/5 アプリ（ESCO Drive.app）を入れています"
 make_script_bundle() {
   mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
   cat > "$APP_BUNDLE/Contents/MacOS/ESCODrive" <<EOS
@@ -152,8 +153,22 @@ EOP
 }
 rm -rf "$APP_BUNDLE"
 APP_KIND="osacompile"
-# Mac標準の方式（AppleScriptのアプリ）：Mac標準の仕組みで作られるので、確実に開ける
-if command -v osacompile >/dev/null 2>&1 && osacompile -o "$APP_BUNDLE" -e "do shell script \"cd '$APP_DIR' && ./runtime/node lib/launcher.mjs >/dev/null 2>&1 &\"" 2>"$WORK/osa.err"; then
+# 専用ウィンドウのアプリ（Chromeを使わない。Dockにも、アプリの一覧にも、1つだけ出る）を、ダウンロードして入れる
+NATIVE_OK=""
+if [ -n "$MACAPP_SHA" ] && curl -fsSL "$BASE/ESCO-Drive-mac.zip?t=$(date +%s)" -o "$WORK/esco-app.zip" 2>/dev/null && [ "$(sha256 "$WORK/esco-app.zip")" = "$MACAPP_SHA" ]; then
+  mkdir -p "$WORK/esco-app"
+  if extract_zip "$WORK/esco-app.zip" "$WORK/esco-app" && [ -x "$WORK/esco-app/ESCO Drive.app/Contents/MacOS/ESCODrive" ]; then
+    mv "$WORK/esco-app/ESCO Drive.app" "$APP_BUNDLE" && NATIVE_OK="1"
+    # 本体の場所を、アプリに教える（情報を変えるので、簡易の署名は、あとで、付け直す）
+    /usr/libexec/PlistBuddy -c "Add :ESCOAppDir string \"$APP_DIR\"" "$APP_BUNDLE/Contents/Info.plist" >/dev/null 2>&1 || /usr/libexec/PlistBuddy -c "Set :ESCOAppDir \"$APP_DIR\"" "$APP_BUNDLE/Contents/Info.plist" >/dev/null 2>&1 || true
+    APP_KIND="専用ウィンドウ"
+  fi
+fi
+[ -n "$NATIVE_OK" ] || echo "（専用ウィンドウのアプリを入手できなかったので、従来の起動用アプリにします）"
+# 従来の方式（予備）：Mac標準の方式（AppleScriptのアプリ）
+if [ -n "$NATIVE_OK" ]; then
+  :
+elif command -v osacompile >/dev/null 2>&1 && osacompile -o "$APP_BUNDLE" -e "do shell script \"cd '$APP_DIR' && ./runtime/node lib/launcher.mjs >/dev/null 2>&1 &\"" 2>"$WORK/osa.err"; then
   if [ -f "$APP_DIR/public/icon.icns" ]; then cp "$APP_DIR/public/icon.icns" "$APP_BUNDLE/Contents/Resources/applet.icns"; fi
 else
   [ ! -s "$WORK/osa.err" ] || printf '（osacompile での作成に失敗：%s）\n' "$(head -c 200 "$WORK/osa.err")" >&2
@@ -168,7 +183,7 @@ PLIST="${APP_BUNDLE}/Contents/Info.plist"
 plist_put() { # キー 型 値：あれば書き換え、なければ追加
   /usr/libexec/PlistBuddy -c "Set :${1} \"${3}\"" "${PLIST}" >/dev/null 2>&1     || /usr/libexec/PlistBuddy -c "Add :${1} ${2} \"${3}\"" "${PLIST}" >/dev/null 2>&1 || true
 }
-if [ -f "${PLIST}" ] && [ -x /usr/libexec/PlistBuddy ]; then
+if [ -z "$NATIVE_OK" ] && [ -f "${PLIST}" ] && [ -x /usr/libexec/PlistBuddy ]; then
   plist_put CFBundleIdentifier string jp.esco.drive
   plist_put CFBundleName string "ESCO Drive"
   plist_put CFBundleDisplayName string "ESCO Drive"
@@ -189,7 +204,10 @@ LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchS
 [ -x "${LSREGISTER}" ] && "${LSREGISTER}" -f "${APP_BUNDLE}" >/dev/null 2>&1 || true
 # 検索の索引にも、新しい情報で登録し直す（索引の初期化はしない。このアプリだけ）
 command -v mdimport >/dev/null 2>&1 && mdimport "${APP_BUNDLE}" >/dev/null 2>&1 || true
-echo "起動用のアプリを作りました（方式：${APP_KIND}）"
+echo "アプリを入れました（方式：${APP_KIND}）"
+if [ -d "$HOME/Applications/Chrome Apps.localized/ESCO Drive.app" ]; then
+  echo "【お知らせ】Chromeで作った「ESCO Drive」（アプリ版）が、残っています。二重になるので、Chromeで chrome://apps を開き、「ESCO Drive」を右クリック→「Chromeから削除」してください。"
+fi
 
 # 前の版が置いた、別の場所のアプリ（ホームの Applications・デスクトップ）は、二重にならないように片づける
 if [ -z "${ESCO_TEST:-}" ] && [ -z "${ESCO_HOME:-}" ]; then
